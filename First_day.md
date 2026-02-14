@@ -365,3 +365,23 @@ When you use ChatGPT:
 ❌ You can’t enforce strict schemas
 
 It’s a black box.
+
+8️⃣ Extensibility
+
+Tomorrow you can:
+
+Add domain-specific scoring
+
+Add financial risk modeling
+
+Add regulatory compliance scoring
+
+Add bias detection
+
+Add stance classification
+
+Add embeddings
+
+Add citation-level attribution
+
+You cannot modify ChatGPT’s internal reasoning.
