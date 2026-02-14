@@ -341,3 +341,27 @@ Evidence weighting
 Diversity penalty
 
 This is not toy-level.
+
+What ChatGPT DOESN’T Give You
+
+When you use ChatGPT:
+
+❌ You don’t see which sources were merged
+
+❌ You don’t see coverage scoring
+
+❌ You don’t see contradiction detection
+
+❌ You don’t see confidence computation
+
+❌ You don’t see research iteration logic
+
+❌ You don’t control evaluation weighting
+
+❌ You can’t persist structured trace
+
+❌ You can’t embed it into a product pipeline easily
+
+❌ You can’t enforce strict schemas
+
+It’s a black box.
