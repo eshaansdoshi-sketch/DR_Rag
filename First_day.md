@@ -385,3 +385,4 @@ Add embeddings
 Add citation-level attribution
 
 You cannot modify ChatGPT’s internal reasoning.
+we also need to add a feature that can know how good the search actually was , and ensure that it was not just a shallow search
