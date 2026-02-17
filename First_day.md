@@ -316,7 +316,7 @@ This is extremely strong architecturally.
 
 Very few student systems include process transparency.
 
-🔍 What Makes This System Mature
+What Makes This System Mature
 
 You now have:
 
