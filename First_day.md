@@ -31,7 +31,7 @@ Secondary: Correctness
 Tertiary: Cost
 Not optimizing for speed.
 
-🏗 FINAL LOCKED ARCHITECTURE
+FINAL LOCKED ARCHITECTURE
 0️⃣ Core Principles
 
 Max 2 iterations
