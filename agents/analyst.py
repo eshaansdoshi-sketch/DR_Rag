@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 from pydantic import BaseModel
 
+from core.bias_detector import classify_insight_stance
 from core.llm_client import LLMClient
 from schemas import (
     Contradiction,
@@ -42,12 +43,39 @@ class AnalystAgent:
                 response_model=AnalysisOutput,
                 max_retries=1
             )
+
+            # Post-process: assign stance to each insight (rule-based, no LLM)
+            for insight in analysis_output.insights:
+                insight.stance = classify_insight_stance(insight.statement)
             
             all_insights.extend(analysis_output.insights)
             all_statistics.extend(analysis_output.statistics)
             all_contradictions.extend(analysis_output.contradictions)
         
         return all_insights, all_statistics, all_contradictions
+
+    def analyze_subtopic(
+        self,
+        subtopic_name: str,
+        sources: List[SourceMetadata],
+    ) -> Tuple[List[Insight], List[Statistic], List[Contradiction]]:
+        """Analyze a single subtopic against provided sources.
+
+        Used by async runner for per-subtopic parallelism.
+        """
+        prompt = self._build_analysis_prompt(subtopic_name, sources)
+        analysis_output = self.llm_client.generate_structured(
+            prompt=prompt,
+            response_model=AnalysisOutput,
+            max_retries=1,
+        )
+        for insight in analysis_output.insights:
+            insight.stance = classify_insight_stance(insight.statement)
+        return (
+            analysis_output.insights,
+            analysis_output.statistics,
+            analysis_output.contradictions,
+        )
 
     def _build_analysis_prompt(self, subtopic: str, sources: List[SourceMetadata]) -> str:
         sources_text = "\n".join([

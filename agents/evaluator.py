@@ -2,7 +2,9 @@ from typing import List
 
 from pydantic import BaseModel, ConfigDict
 
+from core.depth_config import ContradictionSensitivity, FLAG_ALL
 from core.llm_client import LLMClient
+from core.temporal import compute_recency_penalty, compute_temporal_distribution
 from schemas import (
     Contradiction,
     DomainType,
@@ -41,7 +43,9 @@ class EvaluatorAgent:
         insights: List[Insight],
         statistics: List[Statistic],
         contradictions: List[Contradiction],
-        sources: List[SourceMetadata]
+        sources: List[SourceMetadata],
+        is_temporally_sensitive: bool = False,
+        contradiction_sensitivity: ContradictionSensitivity = FLAG_ALL,
     ) -> EvaluationResult:
         subtopic_scores = []
         
@@ -57,6 +61,25 @@ class EvaluatorAgent:
         
         global_confidence = self._compute_global_confidence(subtopic_scores)
         
+        # ── Soft temporal recency penalty (bounded, max 0.05) ────────
+        temporal_dist = compute_temporal_distribution(sources)
+        recency_penalty = compute_recency_penalty(temporal_dist, is_temporally_sensitive)
+        global_confidence = max(0.0, round(global_confidence - recency_penalty, 4))
+
+        # ── Contradiction sensitivity policy (affects reaction, not detection) ──
+        qualifying = [
+            c for c in contradictions
+            if c.severity >= contradiction_sensitivity.min_severity
+        ]
+        if qualifying:
+            penalty = len(qualifying) * contradiction_sensitivity.confidence_penalty
+            penalty = min(penalty, 0.15)  # Hard cap to prevent runaway
+            global_confidence = max(0.0, round(global_confidence - penalty, 4))
+
+        contradiction_escalation = (
+            contradiction_sensitivity.force_refinement and len(qualifying) > 0
+        )
+        
         weak_subtopics = [s.subtopic for s in subtopic_scores if s.status == SubtopicEvaluationStatus.weak]
         
         qualitative_output = self._generate_qualitative_analysis(
@@ -67,13 +90,19 @@ class EvaluatorAgent:
             contradictions
         )
         
+        # Inject recency gap signal for PlanManager spawning
+        missing_aspects = list(qualitative_output.missing_aspects)
+        if recency_penalty > 0:
+            missing_aspects.append("Recent data or updated statistics missing.")
+        
         evaluation = EvaluationResult(
             subtopic_scores=subtopic_scores,
             global_confidence=global_confidence,
-            needs_more_research=global_confidence < 0.7 or bool(weak_subtopics),
+            needs_more_research=global_confidence < 0.7 or bool(weak_subtopics) or contradiction_escalation,
             refined_queries=qualitative_output.refined_queries,
-            missing_aspects=qualitative_output.missing_aspects,
-            plan_updates=qualitative_output.plan_updates
+            missing_aspects=missing_aspects,
+            plan_updates=qualitative_output.plan_updates,
+            contradiction_escalation=contradiction_escalation,
         )
         
         return evaluation

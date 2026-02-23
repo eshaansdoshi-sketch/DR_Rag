@@ -12,7 +12,9 @@ class SearcherAgent:
         self,
         plan: ResearchPlan,
         iteration: int,
-        refined_queries: Optional[List[str]] = None
+        refined_queries: Optional[List[str]] = None,
+        max_results_initial: int = 5,
+        max_results_refined: int = 4,
     ) -> List[SourceMetadata]:
         all_sources = []
         
@@ -21,7 +23,7 @@ class SearcherAgent:
                 query = f"{plan.research_objective} - {subtopic.name}"
                 sources = self.web_search_tool.search(
                     query=query,
-                    max_results=5
+                    max_results=max_results_initial
                 )
                 all_sources.extend(sources)
         
@@ -29,8 +31,12 @@ class SearcherAgent:
             for query in refined_queries:
                 sources = self.web_search_tool.search(
                     query=query,
-                    max_results=4
+                    max_results=max_results_refined
                 )
                 all_sources.extend(sources)
         
         return all_sources
+
+    def search_subtopic(self, query: str, max_results: int = 5) -> List[SourceMetadata]:
+        """Search for a single query. Used by async runner for per-subtopic parallelism."""
+        return self.web_search_tool.search(query=query, max_results=max_results)

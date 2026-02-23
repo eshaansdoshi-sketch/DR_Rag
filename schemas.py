@@ -13,6 +13,7 @@ class SubtopicStatus(str, Enum):
     sufficient = "sufficient"
     weak = "weak"
     complete = "complete"
+    removed = "removed"
 
 
 class SubtopicEvaluationStatus(str, Enum):
@@ -26,6 +27,17 @@ class DomainType(str, Enum):
     news = "news"
     blog = "blog"
     other = "other"
+
+
+class TerminationReason(str, Enum):
+    confidence_threshold_reached = "confidence_threshold_reached"
+    max_iterations_reached = "max_iterations_reached"
+    evidence_strictness_unsatisfied = "evidence_strictness_unsatisfied"
+    token_budget_exceeded = "token_budget_exceeded"
+    timeout_exceeded = "timeout_exceeded"
+    manual_interrupt = "manual_interrupt"
+    error_abort = "error_abort"
+    unknown = "unknown"
 
 
 class Subtopic(BaseModel):
@@ -52,6 +64,7 @@ class SourceMetadata(BaseModel):
     url: HttpUrl = Field(..., description="URL of the source")
     summary: str = Field(..., description="Brief summary of the source content")
     publication_date: Optional[str] = Field(None, description="Publication date if available")
+    publication_year: Optional[int] = Field(None, description="Extracted publication year (derived from publication_date)")
     domain_type: DomainType = Field(..., description="Classification of domain type")
     author_present: bool = Field(..., description="Whether author information is present")
     opinion_score: Score = Field(..., description="Opinion vs fact score: 0.0=factual, 1.0=opinion")
@@ -64,6 +77,7 @@ class Insight(BaseModel):
     statement: str = Field(..., description="The insight statement")
     supporting_sources: List[str] = Field(..., description="List of source URLs supporting this insight")
     confidence: Score = Field(..., description="Confidence score for this insight")
+    stance: str = Field(default="neutral", description="Detected stance: pro, contra, or neutral")
 
 
 class Statistic(BaseModel):
@@ -108,6 +122,7 @@ class EvaluationResult(BaseModel):
     refined_queries: List[str] = Field(..., description="Refined search queries for next iteration")
     missing_aspects: List[str] = Field(..., description="Aspects that need more coverage")
     plan_updates: List[str] = Field(..., description="Suggested updates to research plan")
+    contradiction_escalation: bool = Field(default=False, description="Whether contradictions triggered forced refinement")
 
 
 class ResearchTraceEntry(BaseModel):
@@ -119,6 +134,20 @@ class ResearchTraceEntry(BaseModel):
     weak_subtopics: List[str] = Field(..., description="Subtopics identified as weak")
     plan_updates: List[str] = Field(..., description="Plan updates made in this iteration")
     new_sources_added: int = Field(..., ge=0, description="Number of new sources added")
+    subtopics_added: List[str] = Field(default_factory=list, description="Subtopics dynamically added in this iteration")
+    subtopics_removed: List[str] = Field(default_factory=list, description="Subtopics pruned in this iteration")
+    planning_note: str = Field(default="", description="Explanation of structural plan changes")
+    is_temporally_sensitive: bool = Field(default=False, description="Whether the query was detected as time-sensitive")
+    temporal_distribution: Dict[str, int] = Field(default_factory=dict, description="Source temporal distribution counts")
+    depth_mode: str = Field(default="standard", description="Research depth mode active during this iteration")
+    applied_confidence_threshold: float = Field(default=0.75, description="Effective confidence threshold used for stopping")
+    contradiction_sensitivity: str = Field(default="flag_all", description="Contradiction sensitivity mode active during this iteration")
+    evidence_strictness: str = Field(default="moderate", description="Evidence strictness level active during this iteration")
+    strictness_satisfied: bool = Field(default=True, description="Whether evidence strictness constraints were met")
+    strictness_failures: List[str] = Field(default_factory=list, description="Evidence strictness constraint failures")
+    configured_max_iterations: int = Field(default=2, description="Effective iteration cap for this run")
+    iteration_tokens: int = Field(default=0, description="Total tokens consumed in this iteration")
+    run_tokens_cumulative: int = Field(default=0, description="Cumulative tokens consumed up to this iteration")
 
     @field_validator("subtopic_confidences")
     @classmethod
@@ -147,3 +176,5 @@ class FinalReport(BaseModel):
     references: List[str] = Field(..., description="Complete list of references")
     confidence_score: Score = Field(..., description="Overall report confidence score")
     research_trace: List[ResearchTraceEntry] = Field(..., min_length=1, description="Complete research iteration trace")
+    report_mode: str = Field(default="technical_whitepaper", description="Report presentation mode used")
+    termination_reason: str = Field(default="unknown", description="Explicit reason the run terminated")

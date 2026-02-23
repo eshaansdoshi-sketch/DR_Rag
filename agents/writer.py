@@ -3,6 +3,7 @@ from typing import List
 from pydantic import BaseModel, ConfigDict
 
 from core.llm_client import LLMClient
+from core.report_modes import ReportModePreset, TECHNICAL_WHITEPAPER
 from core.research_memory import ResearchMemory
 from schemas import (
     EvaluationResult,
@@ -29,11 +30,12 @@ class WriterAgent:
         self,
         plan: ResearchPlan,
         memory: ResearchMemory,
-        evaluation: EvaluationResult
+        evaluation: EvaluationResult,
+        report_mode: ReportModePreset = TECHNICAL_WHITEPAPER,
     ) -> FinalReport:
         references = self._collect_references(memory)
         
-        prompt = self._build_report_prompt(plan, memory, evaluation)
+        prompt = self._build_report_prompt(plan, memory, evaluation, report_mode)
         
         report_output = self.llm_client.generate_structured(
             prompt=prompt,
@@ -48,7 +50,8 @@ class WriterAgent:
             recommendations=report_output.recommendations,
             references=references,
             confidence_score=evaluation.global_confidence,
-            research_trace=memory.trace
+            research_trace=memory.trace,
+            report_mode=report_mode.name,
         )
         
         return final_report
@@ -63,7 +66,8 @@ class WriterAgent:
         self,
         plan: ResearchPlan,
         memory: ResearchMemory,
-        evaluation: EvaluationResult
+        evaluation: EvaluationResult,
+        report_mode: ReportModePreset = TECHNICAL_WHITEPAPER,
     ) -> str:
         subtopic_names = ", ".join([s.name for s in plan.subtopics])
         
@@ -112,6 +116,8 @@ CONSTRAINTS:
 - Do NOT include sources or citations beyond what's provided.
 - Focus on synthesis, not speculation.
 - Keep tone formal and analytical.
+
+{report_mode.prompt_instructions}
 
 STRICT OUTPUT RULES:
 - Respond ONLY with valid JSON matching this EXACT structure.

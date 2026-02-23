@@ -1,0 +1,17 @@
+# Core
+pydantic>=2.0
+python-dotenv
+
+# LLM
+groq
+
+# Search
+tavily-python
+requests
+
+# API
+fastapi
+uvicorn[standard]
+
+# Database
+psycopg2-binary
