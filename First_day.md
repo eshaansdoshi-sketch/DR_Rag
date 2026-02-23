@@ -31,7 +31,7 @@ Secondary: Correctness
 Tertiary: Cost
 Not optimizing for speed.
 
-🏗 FINAL LOCKED ARCHITECTURE
+FINAL LOCKED ARCHITECTURE
 0️⃣ Core Principles
 
 Max 2 iterations
@@ -316,7 +316,7 @@ This is extremely strong architecturally.
 
 Very few student systems include process transparency.
 
-🔍 What Makes This System Mature
+What Makes This System Mature
 
 You now have:
 
@@ -341,3 +341,48 @@ Evidence weighting
 Diversity penalty
 
 This is not toy-level.
+
+What ChatGPT DOESN’T Give You
+
+When you use ChatGPT:
+
+❌ You don’t see which sources were merged
+
+❌ You don’t see coverage scoring
+
+❌ You don’t see contradiction detection
+
+❌ You don’t see confidence computation
+
+❌ You don’t see research iteration logic
+
+❌ You don’t control evaluation weighting
+
+❌ You can’t persist structured trace
+
+❌ You can’t embed it into a product pipeline easily
+
+❌ You can’t enforce strict schemas
+
+It’s a black box.
+
+8️⃣ Extensibility
+
+Tomorrow you can:
+
+Add domain-specific scoring
+
+Add financial risk modeling
+
+Add regulatory compliance scoring
+
+Add bias detection
+
+Add stance classification
+
+Add embeddings
+
+Add citation-level attribution
+
+You cannot modify ChatGPT’s internal reasoning.
+we also need to add a feature that can know how good the search actually was , and ensure that it was not just a shallow search
