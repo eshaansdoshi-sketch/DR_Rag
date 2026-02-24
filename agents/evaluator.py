@@ -3,7 +3,9 @@ from typing import List
 from pydantic import BaseModel, ConfigDict
 
 from core.depth_config import ContradictionSensitivity, FLAG_ALL
+from core.event_filter import compute_future_drift_penalty, contains_completed_result
 from core.llm_client import LLMClient
+from core.query_intent import QueryIntent
 from core.temporal import compute_recency_penalty, compute_temporal_distribution
 from schemas import (
     Contradiction,
@@ -46,6 +48,7 @@ class EvaluatorAgent:
         sources: List[SourceMetadata],
         is_temporally_sensitive: bool = False,
         contradiction_sensitivity: ContradictionSensitivity = FLAG_ALL,
+        query_intent: QueryIntent = QueryIntent.OTHER,
     ) -> EvaluationResult:
         subtopic_scores = []
         
@@ -62,9 +65,17 @@ class EvaluatorAgent:
         global_confidence = self._compute_global_confidence(subtopic_scores)
         
         # ── Soft temporal recency penalty (bounded, max 0.05) ────────
-        temporal_dist = compute_temporal_distribution(sources)
-        recency_penalty = compute_recency_penalty(temporal_dist, is_temporally_sensitive)
-        global_confidence = max(0.0, round(global_confidence - recency_penalty, 4))
+        # Skip for FACTUAL_EVENT_WINNER — recency bias is counterproductive
+        recency_penalty = 0.0
+        if query_intent != QueryIntent.FACTUAL_EVENT_WINNER:
+            temporal_dist = compute_temporal_distribution(sources)
+            recency_penalty = compute_recency_penalty(temporal_dist, is_temporally_sensitive)
+            global_confidence = max(0.0, round(global_confidence - recency_penalty, 4))
+
+        # ── Future-drift penalty for factual event queries ────────────
+        drift_penalty = compute_future_drift_penalty(insights, query_intent)
+        if drift_penalty > 0:
+            global_confidence = max(0.0, round(global_confidence - drift_penalty, 4))
 
         # ── Contradiction sensitivity policy (affects reaction, not detection) ──
         qualifying = [
@@ -80,6 +91,39 @@ class EvaluatorAgent:
             contradiction_sensitivity.force_refinement and len(qualifying) > 0
         )
         
+        # ── Factual confidence floor (FACTUAL_EVENT_WINNER) ───────────
+        # Prevents structural metrics from crushing factoid resolution.
+        # STRICTLY SCOPED — only applies to FACTUAL_EVENT_WINNER intent.
+        confidence_floor_applied = False
+        if query_intent == QueryIntent.FACTUAL_EVENT_WINNER and insights:
+            has_completed = contains_completed_result(insights)
+            has_contradictions = len(qualifying) > 0  # from contradiction check above
+            has_source_url = any(
+                getattr(i, 'supporting_sources', None)
+                for i in insights
+            )
+
+            if has_completed and not has_contradictions and has_source_url:
+                # Strong resolution with no contradictions → floor at 0.85
+                if global_confidence < 0.85:
+                    global_confidence = 0.85
+                    confidence_floor_applied = True
+            elif has_completed and has_contradictions:
+                # Resolution found but contradictions exist → softer floor
+                if global_confidence < 0.55:
+                    global_confidence = 0.55
+                    confidence_floor_applied = True
+            elif not has_completed:
+                # Insights exist but no resolution yet → floor at 0.55
+                if global_confidence < 0.55:
+                    global_confidence = 0.55
+                    confidence_floor_applied = True
+
+            # Zero-collapse guard: never 0.00 for factoid with insights
+            if global_confidence < 0.20:
+                global_confidence = 0.20
+                confidence_floor_applied = True
+
         weak_subtopics = [s.subtopic for s in subtopic_scores if s.status == SubtopicEvaluationStatus.weak]
         
         qualitative_output = self._generate_qualitative_analysis(
@@ -95,10 +139,25 @@ class EvaluatorAgent:
         if recency_penalty > 0:
             missing_aspects.append("Recent data or updated statistics missing.")
         
+        # For FACTUAL_EVENT_WINNER, if resolution is found,
+        # override needs_more_research to False.
+        if (
+            query_intent == QueryIntent.FACTUAL_EVENT_WINNER
+            and insights
+            and contains_completed_result(insights)
+        ):
+            needs_more = False
+        else:
+            needs_more = (
+                global_confidence < 0.7
+                or bool(weak_subtopics)
+                or contradiction_escalation
+            )
+
         evaluation = EvaluationResult(
             subtopic_scores=subtopic_scores,
             global_confidence=global_confidence,
-            needs_more_research=global_confidence < 0.7 or bool(weak_subtopics) or contradiction_escalation,
+            needs_more_research=needs_more,
             refined_queries=qualitative_output.refined_queries,
             missing_aspects=missing_aspects,
             plan_updates=qualitative_output.plan_updates,

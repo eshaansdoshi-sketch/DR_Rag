@@ -35,10 +35,27 @@ from core.depth_config import (
     get_depth_preset,
 )
 from core.evidence_strictness import (
+    FACTUAL,
     StrictnessPreset,
     StrictnessResult,
     check_strictness,
     get_strictness_preset,
+)
+from core.event_filter import (
+    build_factual_refinement_query,
+    contains_completed_result,
+    count_agreeing_sources,
+    filter_future_event_insights,
+)
+from core.fallback_extractor import fallback_extract_insights
+from core.query_intent import (
+    QueryIntent,
+    detect_query_intent,
+    extract_event_name,
+    extract_event_year,
+    extract_jurisdiction,
+    is_election_query,
+    reformulate_event_query,
 )
 from core.report_modes import ReportModePreset, get_report_mode
 from core.research_memory import ResearchMemory
@@ -165,6 +182,30 @@ class Orchestrator:
 
         is_temporally_sensitive = detect_temporal_sensitivity(query)
 
+        # ── Event Completion Intent Recognition ────────────────────────
+        query_intent = detect_query_intent(query)
+        event_name = extract_event_name(query)
+        event_year = extract_event_year(query)
+        reformulated = reformulate_event_query(query, query_intent)
+        is_election = is_election_query(query)
+        jurisdiction = extract_jurisdiction(query) if is_election else None
+
+        # Override: disable recency bias for factual event queries
+        if query_intent == QueryIntent.FACTUAL_EVENT_WINNER:
+            is_temporally_sensitive = False
+            # Override strictness to FACTUAL — statistics should never
+            # block factoid resolution (0 stats required, 1 source min)
+            strictness_preset = FACTUAL
+            log_event(logger, logging.INFO, EventType.RUN_START,
+                      "FACTUAL_EVENT_WINNER: strictness overridden to FACTUAL preset",
+                      run_id=run_id)
+
+        # Track resolution state across iterations
+        factual_resolved = False
+        resolution_iteration: Optional[int] = None
+        future_rejections_total = 0
+        fallback_rescue_total = 0
+
         iteration = 1
         refined_queries: Optional[list] = None
         prev_confidence: float = 0.0
@@ -177,7 +218,10 @@ class Orchestrator:
                   max_iterations=effective_max_iterations,
                   max_concurrent=effective_concurrent,
                   timeout_s=max_run_timeout,
-                  budget=token_budget.get_run_summary())
+                  budget=token_budget.get_run_summary(),
+                  query_intent=query_intent.value,
+                  event_name=event_name or "",
+                  event_year=event_year)
 
         # ── Timeout-guarded execution ─────────────────────────────────
         try:
@@ -189,8 +233,14 @@ class Orchestrator:
                     try:
                         # Build search queries for this iteration
                         if iteration == 1:
+                            # For FACTUAL_EVENT_WINNER with reformulation,
+                            # inject the reformulated query alongside subtopic queries
+                            base_objective = plan.research_objective
+                            if query_intent == QueryIntent.FACTUAL_EVENT_WINNER and reformulated:
+                                base_objective = reformulated
+
                             search_queries = [
-                                (f"{plan.research_objective} - {st.name}", st.name)
+                                (f"{base_objective} - {st.name}", st.name)
                                 for st in plan.subtopics
                             ]
                             max_results = preset.source_count_initial
@@ -230,6 +280,50 @@ class Orchestrator:
                                           subtopic=result.subtopic_name,
                                           error=result.error)
 
+                        # ── Debug: log insight counts after analyst ─────────
+                        analyst_insight_count = sum(len(r.insights) for r in subtopic_results)
+                        log_event(logger, logging.INFO, EventType.ITERATION_COMPLETE,
+                                  f"Analyst extracted {analyst_insight_count} insights, "
+                                  f"{new_sources_count} new sources",
+                                  run_id=run_id, iteration=iteration)
+
+                        # ── Fallback extraction (FACTUAL_EVENT_WINNER only) ─
+                        # If analyst produced zero insights but we have sources,
+                        # extract facts directly from raw snippets.
+                        if (
+                            query_intent == QueryIntent.FACTUAL_EVENT_WINNER
+                            and analyst_insight_count == 0
+                            and all_new_sources
+                        ):
+                            fb_insights, fb_count = fallback_extract_insights(
+                                all_new_sources,
+                                subtopic_name=event_name or "Winner",
+                            )
+                            fallback_rescue_total += fb_count
+                            if fb_insights:
+                                memory.add_insights(fb_insights)
+                                log_event(logger, logging.INFO, EventType.ITERATION_COMPLETE,
+                                          f"Fallback extractor rescued {fb_count} insights",
+                                          run_id=run_id, iteration=iteration)
+
+                        # ── Future-event filtering (FACTUAL_EVENT_WINNER) ──
+                        iter_rejections = 0
+                        if query_intent == QueryIntent.FACTUAL_EVENT_WINNER:
+                            memory.insights, iter_rejections = filter_future_event_insights(
+                                memory.insights, query_intent
+                            )
+                            future_rejections_total += iter_rejections
+                            if iter_rejections > 0:
+                                log_event(logger, logging.INFO, EventType.SUBTOPIC_FAILURE,
+                                          f"Filtered {iter_rejections} future-event insights",
+                                          run_id=run_id, iteration=iteration)
+
+                        # ── Factual resolution check ───────────────────────
+                        if query_intent == QueryIntent.FACTUAL_EVENT_WINNER and not factual_resolved:
+                            if contains_completed_result(memory.insights):
+                                factual_resolved = True
+                                resolution_iteration = iteration
+
                         # ── Evaluation (sequential) ───────────────────────
                         evaluation = await asyncio.to_thread(
                             self.evaluator.evaluate,
@@ -240,6 +334,7 @@ class Orchestrator:
                             sources=all_new_sources,
                             is_temporally_sensitive=is_temporally_sensitive,
                             contradiction_sensitivity=contradiction_preset,
+                            query_intent=query_intent,
                         )
 
                         memory.add_evaluation(evaluation)
@@ -306,6 +401,15 @@ class Orchestrator:
                             configured_max_iterations=effective_max_iterations,
                             iteration_tokens=token_budget.iteration_total(iteration),
                             run_tokens_cumulative=token_budget.run_total,
+                            # Event Completion Intent fields
+                            query_intent=query_intent.value,
+                            future_event_rejections=future_rejections_total,
+                            factual_resolution_success=factual_resolved,
+                            detected_event_name=event_name or "",
+                            detected_event_year=event_year,
+                            resolution_iteration=resolution_iteration,
+                            agreement_count=count_agreeing_sources(memory.insights) if query_intent == QueryIntent.FACTUAL_EVENT_WINNER else 0,
+                            fallback_rescue_count=fallback_rescue_total,
                         )
 
                         memory.add_trace_entry(trace_entry)
@@ -317,10 +421,39 @@ class Orchestrator:
                             termination_reason = TerminationReason.confidence_threshold_reached
                             break
 
+                        # ── Factual short-circuit ──────────────────────────
+                        # If event winner resolved, skip further iterations.
+                        # Uses absolute floor (0.70) instead of relative threshold
+                        # to ensure factoid queries always terminate early.
+                        if (
+                            query_intent == QueryIntent.FACTUAL_EVENT_WINNER
+                            and factual_resolved
+                            and evaluation.global_confidence >= 0.70
+                        ):
+                            termination_reason = TerminationReason.confidence_threshold_reached
+                            log_event(logger, logging.INFO, EventType.RUN_COMPLETE,
+                                      "Factual event winner resolved — short-circuit",
+                                      run_id=run_id, iteration=iteration)
+                            break
+
                         if evaluation.plan_updates:
                             self._apply_plan_updates(plan, evaluation.plan_updates)
 
-                        refined_queries = evaluation.refined_queries
+                        # ── Refinement override for unresolved events ──────
+                        if (
+                            query_intent == QueryIntent.FACTUAL_EVENT_WINNER
+                            and not factual_resolved
+                        ):
+                            refined_queries = [
+                                build_factual_refinement_query(
+                                    event_name=event_name,
+                                    jurisdiction=jurisdiction,
+                                    is_election=is_election,
+                                )
+                            ]
+                        else:
+                            refined_queries = evaluation.refined_queries
+
                         iteration += 1
 
                     except BudgetExceeded as exc:

@@ -149,6 +149,17 @@ class ResearchTraceEntry(BaseModel):
     iteration_tokens: int = Field(default=0, description="Total tokens consumed in this iteration")
     run_tokens_cumulative: int = Field(default=0, description="Cumulative tokens consumed up to this iteration")
 
+    # Event Completion Intent Recognition fields
+    query_intent: str = Field(default="OTHER", description="Detected query intent classification")
+    future_event_rejections: int = Field(default=0, description="Number of future-event insights rejected")
+    factual_resolution_success: bool = Field(default=True, description="Whether factual event resolution succeeded")
+    detected_event_name: str = Field(default="", description="Canonical name of detected recurring event")
+    detected_event_year: Optional[int] = Field(default=None, description="Explicit year extracted from query")
+    resolution_iteration: Optional[int] = Field(default=None, description="Iteration where factual resolution was achieved")
+    agreement_count: int = Field(default=0, description="Number of sources agreeing on event winner")
+    fallback_rescue_count: int = Field(default=0, description="Number of insights rescued by deterministic fallback extractor")
+    confidence_floor_applied: bool = Field(default=False, description="Whether a factual confidence floor overrode natural scoring")
+
     @field_validator("subtopic_confidences")
     @classmethod
     def validate_confidence_scores(cls, v: Dict[str, float]) -> Dict[str, float]:

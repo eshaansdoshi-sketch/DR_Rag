@@ -1,9 +1,11 @@
 from typing import List, Tuple
 
-from pydantic import BaseModel
+import logging
+
+from pydantic import BaseModel, ValidationError
 
 from core.bias_detector import classify_insight_stance
-from core.llm_client import LLMClient
+from core.llm_client import LLMClient, StructuredOutputError
 from schemas import (
     Contradiction,
     Insight,
@@ -12,6 +14,7 @@ from schemas import (
     Statistic,
 )
 
+logger = logging.getLogger(__name__)
 
 from pydantic import ConfigDict
 
@@ -38,11 +41,18 @@ class AnalystAgent:
         for subtopic in plan.subtopics:
             prompt = self._build_analysis_prompt(subtopic.name, sources)
             
-            analysis_output = self.llm_client.generate_structured(
-                prompt=prompt,
-                response_model=AnalysisOutput,
-                max_retries=1
-            )
+            try:
+                analysis_output = self.llm_client.generate_structured(
+                    prompt=prompt,
+                    response_model=AnalysisOutput,
+                    max_retries=1
+                )
+            except (StructuredOutputError, ValidationError) as e:
+                logger.error(
+                    "analyst_extraction_failed | subtopic=%s error=%s",
+                    subtopic.name, e,
+                )
+                continue
 
             # Post-process: assign stance to each insight (rule-based, no LLM)
             for insight in analysis_output.insights:
@@ -64,11 +74,26 @@ class AnalystAgent:
         Used by async runner for per-subtopic parallelism.
         """
         prompt = self._build_analysis_prompt(subtopic_name, sources)
-        analysis_output = self.llm_client.generate_structured(
-            prompt=prompt,
-            response_model=AnalysisOutput,
-            max_retries=1,
+
+        try:
+            analysis_output = self.llm_client.generate_structured(
+                prompt=prompt,
+                response_model=AnalysisOutput,
+                max_retries=1,
+            )
+        except (StructuredOutputError, ValidationError) as e:
+            logger.error(
+                "analyst_subtopic_extraction_failed | subtopic=%s error=%s",
+                subtopic_name, e,
+            )
+            return ([], [], [])
+
+        logger.info(
+            "analyst_subtopic_complete | subtopic=%s insights=%d stats=%d",
+            subtopic_name, len(analysis_output.insights),
+            len(analysis_output.statistics),
         )
+
         for insight in analysis_output.insights:
             insight.stance = classify_insight_stance(insight.statement)
         return (

@@ -33,6 +33,14 @@ RELAXED = StrictnessPreset(
     min_domain_types=1,
 )
 
+# Factoid queries (event winners, entity lookups) — zero statistics required
+FACTUAL = StrictnessPreset(
+    name="factual",
+    min_sources_per_insight=1,
+    min_statistics_per_subtopic=0,
+    min_domain_types=1,
+)
+
 MODERATE = StrictnessPreset(
     name="moderate",
     min_sources_per_insight=2,
@@ -49,6 +57,7 @@ STRICT = StrictnessPreset(
 
 STRICTNESS_PRESETS: Dict[str, StrictnessPreset] = {
     "relaxed": RELAXED,
+    "factual": FACTUAL,
     "moderate": MODERATE,
     "strict": STRICT,
 }
