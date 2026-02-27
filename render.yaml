@@ -1,4 +1,5 @@
 services:
+  # ── FastAPI Backend ────────────────────────────────────────────
   - type: web
     name: deep-research-agent
     runtime: python
@@ -13,3 +14,19 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: "3.11"
+      - key: ALLOWED_ORIGINS
+        value: https://dr-rag.onrender.com
+
+  # ── Next.js Frontend ───────────────────────────────────────────
+  - type: web
+    name: deep-research-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://dr-rag.onrender.com
+      - key: NODE_VERSION
+        value: "20"
+

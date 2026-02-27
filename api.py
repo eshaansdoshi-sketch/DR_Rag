@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any, Dict, List, Optional
@@ -64,9 +65,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — restrict in production via ALLOWED_ORIGINS env var (comma-separated).
+# Falls back to allow-all for local development.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+_allowed_origins = (
+    [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if _raw_origins != "*"
+    else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
