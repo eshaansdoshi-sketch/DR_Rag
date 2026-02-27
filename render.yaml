@@ -15,7 +15,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.11"
       - key: ALLOWED_ORIGINS
-        value: https://dr-rag.onrender.com
+        value: https://dr-rag-v1.vercel.app
 
   # ── Next.js Frontend ───────────────────────────────────────────
   - type: web
